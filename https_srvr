@@ -1,0 +1,27 @@
+#!/bin/bash
+
+# Script to install Apache (httpd) and create a user 'shafeeq' with password 'admin'
+
+echo "🔧 Updating system packages..."
+sudo yum update -y
+
+echo "📦 Installing Apache (httpd)..."
+sudo yum install -y httpd
+
+echo "✅ Enabling and starting Apache service..."
+sudo systemctl enable httpd
+sudo systemctl start httpd
+
+echo "👤 Creating user 'shafeeq'..."
+if id "shafeeq" &>/dev/null; then
+    echo "User 'shafeeq' already exists."
+else
+    sudo useradd shafeeq
+    echo "shafeeq:admin" | sudo chpasswd
+    echo "✅ User 'shafeeq' created with password 'admin'"
+fi
+
+echo "🛡️ Ensuring Apache is running..."
+sudo systemctl status httpd --no-pager
+
+echo "✅ Script completed successfully."
