@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Chaos ALB + EC2 Stack for Hackathon (with 7 debug challenges)
+
+Parameters:
+  KeyName:
+    Description: Name of an existing EC2 KeyPair to SSH
+    Type: AWS::EC2::KeyPair::KeyName
+
+  VPCId:
+    Type: AWS::EC2::VPC::Id
+    Description: Select your VPC
+
+  Subnet1:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in AZ-1 for EC2
+
+  Subnet2:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet in AZ-2 for EC2
+
+  Subnet3:
+    Type: AWS::EC2::Subnet::Id
+    Description: Subnet in a different AZ for ALB (misconfigured)
+
+  Subnet4:
+    Type: AWS::EC2::Subnet::Id
+    Description: Another subnet in a different AZ for ALB (misconfigured)
+
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: /aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2
+
+Resources:
+  ChaosSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allows HTTP only, no SSH access
+      VpcId: !Ref VPCId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          FromPort: 0
+          ToPort: 65535
+          CidrIp: 0.0.0.0/0
+
+  ChaosALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: No inbound rules - ALB will not be reachable
+      VpcId: !Ref VPCId
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          CidrIp: 0.0.0.0/0
+
+  ChaosLaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        ImageId: !Ref LatestAmiId
+        InstanceType: t2.micro
+        KeyName: !Ref KeyName
+        SecurityGroupIds:
+          - !Ref ChaosSecurityGroup
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            yum update -y
+            yum install -y httpd
+            echo "<html><body><h1>winner winner chicken Dinner🐔🐔</h1></body></html>" > /var/www/html/index1.html
+      LaunchTemplateName: chaos-launch-template
+
+  ChaosInstance1:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ChaosLaunchTemplate
+        Version: !GetAtt ChaosLaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref Subnet1
+
+  ChaosInstance2:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ChaosLaunchTemplate
+        Version: !GetAtt ChaosLaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref Subnet2
+
+  ChaosInstance3:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref ChaosLaunchTemplate
+        Version: !GetAtt ChaosLaunchTemplate.LatestVersionNumber
+      SubnetId: !Ref Subnet2
+
+  ChaosALB:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: chaos-alb
+      Scheme: internet-facing
+      Subnets:
+        - !Ref Subnet3   # Different AZs from EC2s (misconfiguration)
+        - !Ref Subnet4
+      SecurityGroups:
+        - !Ref ChaosALBSecurityGroup
+
+  ChaosTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: chaos-target-group
+      Port: 80
+      Protocol: HTTP
+      VpcId: !Ref VPCId
+      TargetType: instance
+
+  ChaosListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ChaosTargetGroup
+      LoadBalancerArn: !Ref ChaosALB
+      Port: 8080
+      Protocol: HTTP
